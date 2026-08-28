@@ -1,32 +1,45 @@
-package main
+package game
 
 import (
 	"bufio"
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 )
 
 // Personnage représente le dresseur contrôlé par le joueur.
 type Personnage struct {
-	Nom               string
-	Genre             string
-	Starter           string
-	Type              string // type élémentaire du starter, sert de "classe" (impacte les PV)
-	Niveau            int
-	PVMax             int
-	PV                int
-	ManaMax           int
-	Mana              int
-	Experience        int
-	ExperienceMax     int
-	Or                int
-	Initiative        int
-	Inventaire        []Objet
-	InventaireMax     int
-	InventoryUpgrades int
-	Skills            []string
-	Equipement        Equipment
+	Nom                 string
+	Genre               string
+	Starter             string
+	Type                string // type élémentaire du Pokémon actif, sert de "classe" (impacte les PV)
+	TypeStarter         string // type du Pokémon de départ (fixe) : détermine les attaques apprises
+	Niveau              int
+	PVMax               int
+	PV                  int
+	ManaMax             int
+	Mana                int
+	Experience          int
+	ExperienceMax       int
+	Or                  int
+	Initiative          int
+	Inventaire          []Objet
+	InventaireMax       int
+	InventoryUpgrades   int
+	Skills              []string
+	Equipement          Equipment
+	PotionGratuitePrise bool
+
+	Equipe []Pokemon       // équipe de Pokémon ; Equipe[0] = Pokémon actif (voir party.go)
+	Rival  string          // "Hugo" (si joueuse) ou "Bianca" (si joueur) — voir story.go
+	Flags  map[string]bool // progression persistée (dresseurs battus...) — voir world.go
+
+	// Progression de l'aventure
+	Chapitre      int    // 1..6, voir story.go
+	ZoneActuelle  string // clé de zone dans le monde (world.go)
+	PosX, PosY    int    // dernière position connue sur la carte
+	LaboPokeballs bool   // le cadeau de Pokéballs de la Professeure a été pris
 }
 
 var reader = bufio.NewReader(os.Stdin)
@@ -37,6 +50,7 @@ func lireLigne(prompt string) string {
 	fmt.Print(prompt)
 	ligne, err := reader.ReadString('\n')
 	if err != nil {
+		soundQuit()
 		fmt.Println("\nEntrée fermée, fin du programme.")
 		os.Exit(0)
 	}
@@ -57,8 +71,13 @@ func Init() *Personnage {
 	p.InventaireMax = 10
 	p.InventoryUpgrades = 0
 	p.Inventaire = []Objet{
-		{Nom: "Potion (Restaure 50 PV)", Quantite: 2, Type: "Potion"},
+		{Nom: "Potion (Restaure 50 PV)", Quantite: 3, Type: "Potion"},
 	}
+	p.Chapitre = 1
+	p.ZoneActuelle = "renouet"
+	p.TypeStarter = p.Type
+	mettreAJourSorts(p)
+	initEquipe(p)
 	return p
 }
 
@@ -66,13 +85,20 @@ func Init() *Personnage {
 func charCreation() *Personnage {
 	ClearScreen()
 	fmt.Println(getAscii("professor"))
-	TypeText("Professeure Keteleeria : Bonjour ! Bienvenue dans le monde des Pokémon !")
-	TypeText("Professeure Keteleeria : Je suis la Professeure Keteleeria. Ce monde est peuplé de créatures appelées Pokémon.")
+	TypeText("Professeure Keteleeria : Bonjour ! Bienvenue de nouveau dans la région d'Unys !")
+	TypeText("Professeure Keteleeria : Cela fait des années que la Team Plasma a été dissoute,")
+	lireLigne("\nAppuyez sur Entrée pour continuer...")
+	ClearScreen()
+	fmt.Println(getAscii("professor"))
+	TypeText("Professeure Keteleeria : Bref ! Avant de t'envoyer enquêter, rappelle-moi ton nom.")
 	fmt.Println()
 
 	nom := ""
-	for nom == "" {
-		nom = lireLigne("Comment t'appelles-tu ? ")
+	for !estAlphabetique(nom) {
+		nom = lireLigne("Comment t'appelles-tu ? (lettres uniquement) ")
+		if !estAlphabetique(nom) {
+			fmt.Println("Ton nom ne doit contenir que des lettres. Réessaie.")
+		}
 	}
 	nom = formaterNom(nom)
 	ClearScreen()
@@ -126,8 +152,10 @@ func charCreation() *Personnage {
 
 	ClearScreen()
 	fmt.Println(getAscii("professor"))
-	TypeText(fmt.Sprintf("Professeure Keteleeria : %s t'accompagnera dans ton aventure !", starter))
-	lireLigne("\nAppuyez sur Entrée pour continuer...")
+	TypeText(fmt.Sprintf("Professeure Keteleeria : Merveilleux ! %s a l'air de t'apprécier.", starter))
+	TypeText("Professeure Keteleeria : Prends ces 3 Potions. Entraîne-toi sur la Route 1,")
+	TypeText("Professeure Keteleeria : équipe-toi à la Forge, et découvre ce qui se trame à Arabelle !")
+	lireLigne("\nAppuyez sur Entrée pour commencer ton aventure...")
 
 	return &Personnage{
 		Nom:     nom,
@@ -139,17 +167,31 @@ func charCreation() *Personnage {
 	}
 }
 
+// estAlphabetique renvoie true si s n'est pas vide et ne contient que des lettres
+// (accents compris). Sert à valider le nom du personnage (Mission 1).
+func estAlphabetique(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	return true
+}
+
 // formaterNom met une majuscule au premier caractère et le reste en minuscules.
 func formaterNom(nom string) string {
 	runes := []rune(nom)
 	return strings.ToUpper(string(runes[0])) + strings.ToLower(string(runes[1:]))
 }
 
-// displayInfo affiche la fiche personnage.
+// displayInfo affiche la fiche personnage et l'état de l'équipe.
 func displayInfo(p *Personnage) {
 	fmt.Println("---------------------------")
 	fmt.Printf("Nom        : %s (%s)\n", p.Nom, p.Genre)
-	fmt.Printf("Starter    : %s [%s]\n", p.Starter, p.Type)
+	fmt.Printf("Pokémon actif : %s [%s]\n", p.Starter, p.Type)
 	fmt.Printf("Niveau     : %d (XP : %d/%d)\n", p.Niveau, p.Experience, p.ExperienceMax)
 	fmt.Printf("PV         : %d/%d\n", p.PV, p.PVMax)
 	fmt.Printf("Mana       : %d/%d\n", p.Mana, p.ManaMax)
@@ -159,6 +201,8 @@ func displayInfo(p *Personnage) {
 	fmt.Printf("Équipement : Tête=%s | Torse=%s | Pieds=%s\n",
 		venOuVide(p.Equipement.Tete), venOuVide(p.Equipement.Torse), venOuVide(p.Equipement.Pieds))
 	fmt.Printf("Inventaire : %d/%d emplacements\n", len(p.Inventaire), p.InventaireMax)
+	fmt.Println("---------------------------")
+	afficherEtatEquipe(p)
 	fmt.Println("---------------------------")
 }
 
@@ -171,11 +215,21 @@ func venOuVide(s string) string {
 }
 
 // dead vérifie si le joueur est K.O. (0 PV) et le ressuscite avec 50% de ses PV max.
+// Toute l'équipe est également remise sur pied à 50 % pour rester jouable.
 func dead(p *Personnage) {
 	if p.PV <= 0 {
-		fmt.Println(p.Nom + " est K.O. ! Transport en urgence vers le Centre Pokémon...")
+		bruitage("ko")
+		fmt.Println(p.Nom + " n'a plus de Pokémon en état de combattre ! Transport au Centre Pokémon...")
 		p.PV = p.PVMax / 2
-		fmt.Printf("%s se réveille avec %d/%d PV.\n", p.Nom, p.PV, p.PVMax)
+		for i := range p.Equipe {
+			if p.Equipe[i].PV <= 0 {
+				p.Equipe[i].PV = p.Equipe[i].PVMax / 2
+			}
+		}
+		if len(p.Equipe) > 0 {
+			p.Equipe[0].PV = p.PV
+		}
+		fmt.Printf("Ton équipe se réveille. %s : %d/%d PV.\n", p.Starter, p.PV, p.PVMax)
 	}
 }
 
@@ -196,8 +250,10 @@ func gainExperience(p *Personnage, xp int) {
 		p.ManaMax += bonusMana
 		p.Mana = p.ManaMax
 
+		bruitage("level")
 		fmt.Printf("Niveau supérieur ! %s passe niveau %d (+%d PV max, +%d Mana max, PV/Mana restaurés).\n",
 			p.Nom, p.Niveau, bonusPV, bonusMana)
+		mettreAJourSorts(p) // nouvelle attaque à certains niveaux (Bonus 1)
 	}
 	fmt.Printf("Expérience : %d/%d\n", p.Experience, p.ExperienceMax)
 }

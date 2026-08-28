@@ -1,4 +1,4 @@
-package main
+package game
 
 import "fmt"
 
@@ -18,22 +18,27 @@ type Recette struct {
 }
 
 // recettesForgeron liste les équipements fabricables et leur coût en ressources.
+// Correspondance avec le sujet (Tâches 13 & 15) :
+//
+//	Restes        = "Chapeau de l'aventurier"  -> Tête,  +10 PV max, 1 Plume + 1 Cuir
+//	Veste de Combat = "Tunique de l'aventurier" -> Torse, +25 PV max, 2 Fourrure + 1 Peau
+//	Grelot Coque  = "Bottes de l'aventurier"   -> Pieds, +15 PV max, 1 Fourrure + 1 Cuir
 var recettesForgeron = []Recette{
 	{
-		Nom:        "Veste de Combat",
-		Slot:       "Torse",
+		Nom:        "Restes",
+		Slot:       "Tete",
 		Ressources: map[string]int{"Plume de Déflaisan": 1, "Cuir de Roitiflam": 1},
 		BonusPV:    10,
 	},
 	{
-		Nom:        "Restes",
-		Slot:       "Tete", // On met 'Tete' juste pour l'emplacement d'équipement dans notre struct générique
+		Nom:        "Veste de Combat",
+		Slot:       "Torse",
 		Ressources: map[string]int{"Plume de Poichigeon": 2, "Peau de Grotichon": 1},
 		BonusPV:    25,
 	},
 	{
 		Nom:        "Grelot Coque",
-		Slot:       "Pieds", // Idem
+		Slot:       "Pieds",
 		Ressources: map[string]int{"Plume de Poichigeon": 1, "Cuir de Roitiflam": 1},
 		BonusPV:    15,
 	},
@@ -46,10 +51,11 @@ const coutForge = 5
 func forgeronMenu(p *Personnage) {
 	for {
 		ClearScreen()
-		fmt.Println("\n=== Forgeron ===")
-		fmt.Printf("Or : %d\n", p.Or)
+		fmt.Println("\n" + titre("Forgeron"))
+		fmt.Printf("Or : %s\n\n", col(fmt.Sprintf("%d", p.Or), cJaune))
 		for i, r := range recettesForgeron {
-			fmt.Printf("%d. %s (%d or)\n", i+1, r.Nom, coutForge)
+			fmt.Printf("%d. %-16s %d or + %s   (+%d PV max, %s)\n",
+				i+1, r.Nom, coutForge, listeRessources(r), r.BonusPV, r.Slot)
 		}
 		fmt.Println("R. Retour au menu")
 
@@ -60,10 +66,24 @@ func forgeronMenu(p *Personnage) {
 		index := indexFromChoice(choix, len(recettesForgeron))
 		if index == -1 {
 			fmt.Println("Choix invalide.")
+			lireLigne("\nAppuyez sur Entrée...")
 			continue
 		}
 		fabriquer(p, recettesForgeron[index])
+		lireLigne("\nAppuyez sur Entrée...")
 	}
+}
+
+// listeRessources formate les ressources d'une recette : "2 Plume de Poichigeon, 1 Peau de Grotichon".
+func listeRessources(r Recette) string {
+	s := ""
+	for nom, qte := range r.Ressources {
+		if s != "" {
+			s += ", "
+		}
+		s += fmt.Sprintf("%d %s", qte, nom)
+	}
+	return s
 }
 
 // fabriquer vérifie l'or et les ressources nécessaires puis fabrique l'équipement demandé.
